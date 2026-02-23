@@ -16,4 +16,7 @@ env/
 # data/
 
 # バックアップ
-# backup/
+backup/
+
+# 個人情報を含むファイル
+subscribers.txt
