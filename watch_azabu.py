@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 """
 パークコート麻布十番東京 予約サイト監視システム
-予約受付開始を検知してLINE公式アカウントから通知を送信
+予約受付開始を検知し、その後も枠の変化を継続監視してLINE通知を送信
 
 【監視方式】
 Phase 1: 受付開始前 → requestsで軽量チェック（"予約を受け付けておりません" の有無）
-Phase 2: 受付開始後 → Playwrightでカレンダー詳細を取得して通知
+Phase 2: 受付開始直後 → 速報通知 + Playwrightでカレンダー詳細取得
+Phase 3: 継続監視 → Playwrightでカレンダーを定期チェックし、枠の変化を通知
 """
 
 import os
@@ -16,6 +17,7 @@ import json
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 import requests
+import glob as glob_module
 
 # 環境変数読み込み
 load_dotenv()
@@ -29,6 +31,7 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "2"))
 DATA_DIR = "./data"
 SNAP_FILE = os.path.join(DATA_DIR, "snapshot_hash_azabu.txt")
 RAW_FILE = os.path.join(DATA_DIR, "last_raw_azabu.txt")
+STATE_FILE = os.path.join(DATA_DIR, "state_azabu.txt")  # "not_available" or "available"
 LOG_FILE = os.path.join(DATA_DIR, "monitor_azabu.log")
 
 # 受付停止中のキーワード
@@ -65,10 +68,74 @@ def log_message(message):
 def ensure_files():
     """必要なファイルとディレクトリを作成"""
     os.makedirs(DATA_DIR, exist_ok=True)
-    for filepath in [SNAP_FILE, RAW_FILE]:
+    for filepath in [SNAP_FILE, RAW_FILE, STATE_FILE]:
         if not os.path.exists(filepath):
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write("")
+
+
+def load_state():
+    """前回の状態を読み込み"""
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+def save_state(state):
+    """状態を保存"""
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        f.write(state)
+
+
+def cleanup_screenshots():
+    """古いスクリーンショットを削除（最新1つ以外）"""
+    try:
+        files = glob_module.glob(os.path.join(DATA_DIR, "screenshot_azabu_*.png"))
+        if len(files) > 1:
+            files.sort(key=os.path.getmtime)
+            for old in files[:-1]:
+                os.remove(old)
+    except Exception:
+        pass
+
+
+def diff_summary(old_text, new_text):
+    """予約枠の差分を人間にわかりやすく要約"""
+    old_lines = old_text.strip().splitlines() if old_text else []
+    new_lines = new_text.strip().splitlines() if new_text else []
+
+    # 日付→ステータスの辞書を作成
+    def parse_slots(lines):
+        slots = {}
+        for line in lines:
+            line = line.strip()
+            if line:
+                slots[line.rsplit(" ", 1)[0] if " " in line else line] = line
+        return slots
+
+    old_slots = parse_slots(old_lines)
+    new_slots = parse_slots(new_lines)
+
+    changes = []
+
+    # 新規追加
+    for key in new_slots:
+        if key not in old_slots:
+            changes.append(f"【新規】{new_slots[key]}")
+
+    # 変更
+    for key in new_slots:
+        if key in old_slots and old_slots[key] != new_slots[key]:
+            changes.append(f"【変更】{old_slots[key]} → {new_slots[key]}")
+
+    # 削除
+    for key in old_slots:
+        if key not in new_slots:
+            changes.append(f"【削除】{old_slots[key]}")
+
+    return "\n".join(changes[:20]) if changes else ""
 
 
 def digest(text):
@@ -251,6 +318,7 @@ def main():
     ensure_files()
 
     # 前回データ読み込み
+    prev_state = load_state()  # "not_available", "available", or ""
     prev_hash = ""
     prev_raw = ""
     try:
@@ -261,35 +329,40 @@ def main():
     except Exception:
         pass
 
-    # Phase 1: 軽量チェック
+    log_message(f"前回の状態: {prev_state or '初回実行'}")
+
+    # ── Phase 1: 軽量チェック（受付開始前か後か判定）──
     status, page_body = check_page_with_requests()
 
     if status == "error":
         log_message("ページ取得に失敗しました。次回の実行で再試行します。")
         return
 
+    # ── まだ受付開始前 ──
     if status == "not_available":
         log_message("まだ予約受付は開始されていません。")
 
-        # ページ内容のハッシュで微妙な変化も検知
         current_hash = digest(page_body)
         if prev_hash and current_hash != prev_hash:
-            log_message("ページに何らかの変化を検知しました（受付はまだ開始されていません）")
+            log_message("ページに何らかの変化を検知（受付はまだ未開始）")
 
-        # ハッシュ保存
         with open(SNAP_FILE, "w", encoding="utf-8") as f:
             f.write(current_hash)
         with open(RAW_FILE, "w", encoding="utf-8") as f:
             f.write("not_available")
+        save_state("not_available")
 
         log_message("監視完了（受付待ち）")
         return
 
-    # Phase 2: 受付が開始された！
-    log_message("★★★ 予約受付が開始されました！ ★★★")
+    # ── 受付が開始されている！ ──
+    is_first_detection = (prev_state != "available")
 
-    # まずは即座にLINE通知（速報）
-    urgent_message = f"""【速報】パークコート麻布十番東京
+    # ── Phase 2: 初回検知 → 速報通知 ──
+    if is_first_detection:
+        log_message("★★★ 予約受付が開始されました！ ★★★")
+
+        urgent_message = f"""【速報】パークコート麻布十番東京
 予約受付が開始されました！
 
 今すぐアクセスしてください！
@@ -301,41 +374,89 @@ def main():
 ※アクセス集中の可能性があります
 ※1世帯1枠まで"""
 
-    line_broadcast(urgent_message)
+        line_broadcast(urgent_message)
+    else:
+        log_message("受付中（継続監視）")
 
-    # Playwrightでカレンダー詳細を取得
+    # ── Phase 3: Playwrightでカレンダー詳細を取得 ──
     calendar_text = check_calendar_with_playwright()
 
-    if calendar_text:
-        # カレンダーの空き状況を通知
-        has_availability = any(
-            any(s in line for s in ["○", "△"]) and any(d in line for d in ["月", "日"])
-            for line in calendar_text.splitlines()
-        )
+    if not calendar_text:
+        log_message("カレンダー詳細を取得できませんでした")
+        if is_first_detection:
+            log_message("速報は送信済みです")
+        save_state("available")
+        with open(RAW_FILE, "w", encoding="utf-8") as f:
+            f.write(prev_raw)  # 前回データを維持
+        return
 
-        if has_availability:
-            detail_message = f"""【予約枠情報】パークコート麻布十番東京
+    # カレンダーの変化を検知
+    current_hash = digest(calendar_text)
+    changed = (current_hash != prev_hash)
 
-予約枠の空き状況:
-○：余裕あり、△：まもなく満席
+    log_message(f"カレンダー変化: {'あり' if changed else 'なし'}")
 
-{calendar_text}
+    if is_first_detection or changed:
+        # 差分を計算
+        diff = ""
+        if not is_first_detection and prev_raw and prev_raw != "not_available":
+            diff = diff_summary(prev_raw, calendar_text)
 
-URL: {URL}
-確認時刻: {jst_now()}"""
+        # 空き枠の有無を確認
+        available_lines = [
+            line for line in calendar_text.splitlines()
+            if any(s in line for s in ["○", "△"]) and any(d in line for d in ["月", "日"])
+        ]
+        full_lines = [
+            line for line in calendar_text.splitlines()
+            if "×" in line and any(d in line for d in ["月", "日"])
+        ]
 
-            line_broadcast(detail_message)
+        # 通知メッセージ作成
+        if is_first_detection:
+            header = "【予約枠情報】パークコート麻布十番東京"
         else:
-            log_message("カレンダーは表示されましたが、空き枠（○/△）は見つかりませんでした")
+            header = "【予約枠更新】パークコート麻布十番東京"
+
+        message_parts = [header, ""]
+
+        if diff:
+            message_parts.append("▼ 変更点:")
+            message_parts.append(diff)
+            message_parts.append("")
+
+        message_parts.append("▼ 現在の空き状況:")
+        message_parts.append("○：余裕あり △：まもなく満席 ×：満席")
+        message_parts.append("")
+
+        if available_lines:
+            message_parts.append("【空きあり】")
+            message_parts.extend(available_lines[:15])
+        else:
+            message_parts.append("現在、空き枠はありません")
+
+        if full_lines:
+            message_parts.append("")
+            message_parts.append("【満席】")
+            message_parts.extend(full_lines[:10])
+
+        message_parts.extend([
+            "",
+            f"URL: {URL}",
+            f"確認時刻: {jst_now()}"
+        ])
+
+        line_broadcast("\n".join(message_parts))
     else:
-        log_message("カレンダー詳細は取得できませんでしたが、速報は送信済みです")
+        log_message("カレンダーに変化なし。通知はスキップします。")
 
     # スナップショット保存
-    current_hash = digest(page_body)
     with open(SNAP_FILE, "w", encoding="utf-8") as f:
         f.write(current_hash)
     with open(RAW_FILE, "w", encoding="utf-8") as f:
-        f.write(calendar_text if calendar_text else "available_no_calendar")
+        f.write(calendar_text)
+    save_state("available")
+    cleanup_screenshots()
 
     log_message("監視完了")
 
