@@ -2,15 +2,16 @@ name: 予約サイト監視
 
 on:
   schedule:
-    # 3分ごとに実行
-    - cron: "*/3 * * * *"
+    # 6時間ごとに実行（スクリプト内で350分間ループ）
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     # 手動実行も可能
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 360
+
     steps:
       - name: コードをチェックアウト
         uses: actions/checkout@v4

@@ -386,22 +386,8 @@ def test_simulate():
         log_message("カレンダー通知の送信に失敗しました")
 
 
-def main():
-    """メイン処理"""
-    # テストモード
-    test_mode = os.getenv("TEST_MODE", "").lower()
-    if test_mode in ("true", "1", "yes"):
-        test_notification()
-        return
-    if test_mode == "simulate":
-        test_simulate()
-        return
-
-    log_message("=" * 50)
-    log_message("パークコート麻布十番東京 予約監視開始")
-    log_message(f"対象URL: {URL}")
-    log_message("=" * 50)
-
+def run_once():
+    """1回分の監視チェックを実行。戻り値: 次回も継続するかどうか (True/False)"""
     ensure_files()
 
     # 前回データ読み込み
@@ -422,8 +408,8 @@ def main():
     status, page_body = check_page_with_requests()
 
     if status == "error":
-        log_message("ページ取得に失敗しました。次回の実行で再試行します。")
-        return
+        log_message("ページ取得に失敗しました。次回のチェックで再試行します。")
+        return True  # エラーでもループ継続
 
     # ── まだ受付開始前 ──
     if status == "not_available":
@@ -439,8 +425,8 @@ def main():
             f.write("not_available")
         save_state("not_available")
 
-        log_message("監視完了（受付待ち）")
-        return
+        log_message("チェック完了（受付待ち）")
+        return True  # ループ継続
 
     # ── 受付が開始されている！ ──
     is_first_detection = (prev_state != "available")
@@ -475,7 +461,7 @@ def main():
         save_state("available")
         with open(RAW_FILE, "w", encoding="utf-8") as f:
             f.write(prev_raw)  # 前回データを維持
-        return
+        return True  # ループ継続
 
     # カレンダーの変化を検知
     current_hash = digest(calendar_text)
@@ -545,7 +531,60 @@ def main():
     save_state("available")
     cleanup_screenshots()
 
-    log_message("監視完了")
+    log_message("チェック完了")
+    return True  # ループ継続
+
+
+# ループ設定
+LOOP_DURATION_MIN = 350  # ループ継続時間（分）≒約5時間50分
+LOOP_INTERVAL_SEC = CHECK_INTERVAL * 60  # チェック間隔（秒）
+
+
+def main():
+    """メイン処理: 55分間ループしながら定期チェック"""
+    # テストモード
+    test_mode = os.getenv("TEST_MODE", "").lower()
+    if test_mode in ("true", "1", "yes"):
+        test_notification()
+        return
+    if test_mode == "simulate":
+        test_simulate()
+        return
+
+    log_message("=" * 50)
+    log_message("パークコート麻布十番東京 予約監視開始")
+    log_message(f"対象URL: {URL}")
+    log_message(f"ループ: {LOOP_DURATION_MIN}分間、{CHECK_INTERVAL}分間隔")
+    log_message("=" * 50)
+
+    start_time = time.time()
+    end_time = start_time + LOOP_DURATION_MIN * 60
+    check_count = 0
+
+    while time.time() < end_time:
+        check_count += 1
+        log_message(f"--- チェック #{check_count} ---")
+
+        try:
+            should_continue = run_once()
+            if not should_continue:
+                log_message("監視を終了します")
+                break
+        except Exception as e:
+            log_message(f"チェック中にエラー: {e}")
+
+        # 残り時間があればスリープ
+        remaining = end_time - time.time()
+        if remaining > LOOP_INTERVAL_SEC:
+            log_message(f"次のチェックまで{CHECK_INTERVAL}分待機...")
+            time.sleep(LOOP_INTERVAL_SEC)
+        elif remaining > 0:
+            log_message(f"残り{int(remaining)}秒、最終チェックへ")
+            time.sleep(remaining)
+        else:
+            break
+
+    log_message(f"監視ループ終了（{check_count}回チェック実施）")
 
 
 if __name__ == "__main__":

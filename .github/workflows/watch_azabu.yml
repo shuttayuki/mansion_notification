@@ -2,8 +2,8 @@ name: パークコート麻布十番 予約監視
 
 on:
   schedule:
-    # 2分ごとに実行
-    - cron: "*/2 * * * *"
+    # 6時間ごとに実行（スクリプト内で350分間ループ）
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
       test_mode:
@@ -19,6 +19,7 @@ on:
 jobs:
   monitor:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: コードをチェックアウト

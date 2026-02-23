@@ -283,19 +283,16 @@ def diff_summary(old_text, new_text):
     
     return "\n".join(summary)
 
-def main():
-    """メイン処理"""
-    log_message("監視開始")
-    
-    # ファイル初期化
+def run_once():
+    """1回分の監視チェックを実行。戻り値: 次回も継続するかどうか (True/False)"""
     ensure_files()
-    
+
     # 送信先リスト読み込み
     subscribers = load_subscribers()
     if not subscribers:
         log_message("エラー: 送信先が設定されていません。subscribers.txt を確認してください。")
-        return
-    
+        return False  # 設定不備なのでループ停止
+
     # 前回のスナップショット読み込み
     prev_hash = ""
     prev_raw = ""
@@ -306,7 +303,7 @@ def main():
             prev_raw = f.read()
     except Exception as e:
         log_message(f"前回データ読み込みエラー: {e}")
-    
+
     # Playwrightでページ監視
     for attempt in range(1, 4):
         try:
@@ -361,7 +358,7 @@ def main():
                         "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4"
                     ]
                 )
-                
+
                 context = browser.new_context(
                     viewport={"width": 1366, "height": 900},
                     user_agent=(
@@ -370,67 +367,66 @@ def main():
                         "Chrome/120.0.0.0 Safari/537.36"
                     )
                 )
-                
+
                 page = context.new_page()
-                
+
                 # ページ読み込み
                 log_message(f"ページアクセス: {URL}")
                 page.goto(URL, wait_until="domcontentloaded", timeout=30000)
-                
+
                 # JavaScript描画完了待ち
                 try:
                     page.wait_for_load_state("networkidle", timeout=15000)
                 except PWTimeout:
                     log_message("ネットワークアイドル待ちタイムアウト、明示待ちに切り替え")
-                
+
                 # 追加の遅延（画像・JS遅延対策）
                 page.wait_for_timeout(5000)
-                
+
                 # 月次切り替え処理を無効化（安定性最優先）
                 try:
                     # 現在の月を確認のみ
                     current_month = page.locator(".ui-datepicker-month").first.inner_text(timeout=3000)
                     log_message(f"監視対象月: {current_month}")
                     log_message("月切り替え処理は無効化されています（現在の月のみ監視）")
-                            
+
                 except Exception as e:
                     log_message(f"月の確認でエラー: {e}")
                     log_message("月の確認に失敗しましたが、監視は継続します")
-                
+
                 # スクリーンショット保存（デバッグ用）
                 screenshot_path = os.path.join(DATA_DIR, f"last_screenshot_{int(time.time())}.png")
                 page.screenshot(path=screenshot_path, full_page=True)
                 log_message(f"スクリーンショット保存: {screenshot_path}")
                 # 古いスクリーンショットを削除
                 cleanup_screenshots()
-                
+
                 # カレンダーテキスト抽出
                 calendar_text = pick_calendar_text(page)
                 if not calendar_text:
                     raise RuntimeError("カレンダー領域の抽出に失敗しました")
-                
+
                 # 変化検知
                 current_hash = digest(calendar_text)
                 changed = (current_hash != prev_hash)
-                
+
                 # トリガー条件チェック
                 positive = any(key in calendar_text for key in POSITIVE_KEYS)
                 negative = any(key in calendar_text for key in NEGATIVE_KEYS)
-                
+
                 # 通知送信（実際の予約枠に○または△がある場合）
-                # 凡例の「○ 余裕あり」は除外し、実際の日付行に○または△がある場合のみ
                 has_actual_availability = any(
                     any(status in line for status in ["○", "△"]) and any(date_indicator in line for date_indicator in ["202", "月", "日"])
                     for line in calendar_text.splitlines()
                 )
-                
+
                 log_message(f"予約枠の状況確認: {has_actual_availability}, 変化: {changed}")
-                
+
                 # 実際の予約枠に○がある場合のみ通知（変化があった場合のみ）
                 if has_actual_availability and changed:
                     # 差分要約
                     summary = diff_summary(prev_raw, calendar_text)
-                    
+
                     # 通知メッセージ作成
                     message = f"""【予約枠状況更新】{jst_now()}
 
@@ -451,34 +447,77 @@ URL: {URL}
                     success_count = 0
                     if line_broadcast(message):
                         success_count = 1
-                    
+
                     log_message(f"通知完了: {success_count} 件成功")
-                
+
                 # スナップショット保存
                 with open(SNAP_FILE, "w", encoding="utf-8") as f:
                     f.write(current_hash)
                 with open(RAW_FILE, "w", encoding="utf-8") as f:
                     f.write(calendar_text)
-                
+
                 # クリーンアップ
                 context.close()
                 browser.close()
-                
-                log_message("監視完了")
-                return
-                
+
+                log_message("チェック完了")
+                return True  # ループ継続
+
         except Exception as e:
             log_message(f"試行 {attempt}/3 失敗: {e}")
             if attempt < 3:
-                # 指数バックオフで待機時間を増加
-                wait_time = 5 * (2 ** (attempt - 1))  # 待機時間を延長
+                wait_time = 5 * (2 ** (attempt - 1))
                 log_message(f"{wait_time}秒待機してから再試行...")
                 time.sleep(wait_time)
             else:
                 log_message("最大試行回数に達しました")
-                # エラー通知（任意）
-                error_message = f"【監視エラー】{jst_now()}\n\nエラー: {e}\n\n監視システムが正常に動作していません。\n\n次回の定期実行で再試行されます。"
+                error_message = f"【監視エラー】{jst_now()}\n\nエラー: {e}\n\n監視システムが正常に動作していません。\n\n次回のチェックで再試行されます。"
                 line_broadcast(error_message)
+
+    return True  # エラーでもループ継続
+
+
+# ループ設定
+LOOP_DURATION_MIN = 350  # ループ継続時間（分）≒約5時間50分
+LOOP_INTERVAL_SEC = CHECK_INTERVAL * 60  # チェック間隔（秒）
+
+
+def main():
+    """メイン処理: 55分間ループしながら定期チェック"""
+    log_message("=" * 50)
+    log_message("セントラルガーデン月島 予約監視開始")
+    log_message(f"対象URL: {URL}")
+    log_message(f"ループ: {LOOP_DURATION_MIN}分間、{CHECK_INTERVAL}分間隔")
+    log_message("=" * 50)
+
+    start_time = time.time()
+    end_time = start_time + LOOP_DURATION_MIN * 60
+    check_count = 0
+
+    while time.time() < end_time:
+        check_count += 1
+        log_message(f"--- チェック #{check_count} ---")
+
+        try:
+            should_continue = run_once()
+            if not should_continue:
+                log_message("監視を終了します")
+                break
+        except Exception as e:
+            log_message(f"チェック中にエラー: {e}")
+
+        # 残り時間があればスリープ
+        remaining = end_time - time.time()
+        if remaining > LOOP_INTERVAL_SEC:
+            log_message(f"次のチェックまで{CHECK_INTERVAL}分待機...")
+            time.sleep(LOOP_INTERVAL_SEC)
+        elif remaining > 0:
+            log_message(f"残り{int(remaining)}秒、最終チェックへ")
+            time.sleep(remaining)
+        else:
+            break
+
+    log_message(f"監視ループ終了（{check_count}回チェック実施）")
                     
 
 if __name__ == "__main__":
