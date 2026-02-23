@@ -326,11 +326,75 @@ LINE通知が正常に動作しています。
         log_message("テスト通知の送信に失敗しました")
 
 
+def test_simulate():
+    """予約受付開始を模擬し、本番と同じ通知フローをテスト"""
+    log_message("シミュレーションモードで実行（予約開始を模擬）")
+
+    # 速報通知（本番と同じメッセージ）
+    urgent_message = f"""【⚠️テスト】【速報】パークコート麻布十番東京
+予約受付が開始されました！
+
+今すぐアクセスしてください！
+{URL}
+
+第1期1次モデルルームご案内会
+検知時刻: {jst_now()}
+
+※これはシミュレーションです（実際の受付開始ではありません）
+※アクセス集中の可能性があります
+※1世帯1枠まで"""
+
+    success = line_broadcast(urgent_message)
+    if not success:
+        log_message("速報通知の送信に失敗しました")
+        return
+
+    # カレンダー詳細通知（ダミーデータ）
+    dummy_calendar = [
+        "3月 8日 ○",
+        "3月 9日 △",
+        "3月 15日 ×",
+        "3月 16日 ○",
+        "3月 22日 ×",
+    ]
+
+    message_parts = [
+        "【⚠️テスト】【予約枠情報】パークコート麻布十番東京",
+        "",
+        "▼ 現在の空き状況:",
+        "○：余裕あり △：まもなく満席 ×：満席",
+        "",
+        "【空きあり】",
+        "3月 8日 ○",
+        "3月 9日 △",
+        "3月 16日 ○",
+        "",
+        "【満席】",
+        "3月 15日 ×",
+        "3月 22日 ×",
+        "",
+        f"URL: {URL}",
+        f"確認時刻: {jst_now()}",
+        "",
+        "※これはシミュレーションです（ダミーデータ）",
+    ]
+
+    success = line_broadcast("\n".join(message_parts))
+    if success:
+        log_message("シミュレーション通知の送信に成功しました")
+    else:
+        log_message("カレンダー通知の送信に失敗しました")
+
+
 def main():
     """メイン処理"""
     # テストモード
-    if os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes"):
+    test_mode = os.getenv("TEST_MODE", "").lower()
+    if test_mode in ("true", "1", "yes"):
         test_notification()
+        return
+    if test_mode == "simulate":
+        test_simulate()
         return
 
     log_message("=" * 50)
