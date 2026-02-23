@@ -1,0 +1,19 @@
+# 環境変数（APIキー等の機密情報）
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
+
+# データファイル（必要に応じてコメントアウト）
+# data/
+
+# バックアップ
+# backup/
