@@ -7,13 +7,14 @@ on:
   workflow_dispatch:
     inputs:
       test_mode:
-        description: 'テスト通知を送信する（LINE疎通確認用）'
+        description: 'テストモード選択'
         required: false
         default: 'false'
         type: choice
         options:
           - 'false'
           - 'true'
+          - 'simulate'
 
 jobs:
   monitor:
