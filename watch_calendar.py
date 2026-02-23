@@ -27,7 +27,6 @@ CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "2"))
 DATA_DIR = "./data"
 SNAP_FILE = os.path.join(DATA_DIR, "snapshot_hash.txt")
 RAW_FILE = os.path.join(DATA_DIR, "last_raw.txt")
-SUBS_FILE = "./subscribers.txt"
 LOG_FILE = os.path.join(DATA_DIR, "monitor.log")
 
 # 監視対象のキーワード
@@ -66,22 +65,6 @@ def ensure_files():
 def digest(text):
     """テキストのハッシュ値を計算"""
     return hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
-
-def load_subscribers():
-    """送信先IDリストを読み込み"""
-    if not os.path.exists(SUBS_FILE):
-        log_message("警告: subscribers.txt が見つかりません")
-        return []
-    
-    with open(SUBS_FILE, "r", encoding="utf-8") as f:
-        subscribers = []
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                subscribers.append(line)
-    
-    log_message("送信先: 公式LINE友だち全員")
-    return subscribers
 
 def line_broadcast(text):
     """LINE公式アカウントからプッシュ通知を送信"""
@@ -286,12 +269,6 @@ def diff_summary(old_text, new_text):
 def run_once():
     """1回分の監視チェックを実行。戻り値: 次回も継続するかどうか (True/False)"""
     ensure_files()
-
-    # 送信先リスト読み込み
-    subscribers = load_subscribers()
-    if not subscribers:
-        log_message("エラー: 送信先が設定されていません。subscribers.txt を確認してください。")
-        return False  # 設定不備なのでループ停止
 
     # 前回のスナップショット読み込み
     prev_hash = ""
