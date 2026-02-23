@@ -1,12 +1,20 @@
-# セントラルガーデン月島 ザ タワー 予約監視システム
+# マンション予約監視システム
 
-予約サイトの更新を自動監視し、LINE公式アカウントから通知を送信するシステムです。
+三井不動産の予約サイトを自動監視し、LINE公式アカウントから通知を送信するシステムです。
+
+## 監視対象物件
+
+| 物件 | スクリプト | ワークフロー |
+|------|-----------|-------------|
+| セントラルガーデン月島 ザ タワー | `watch_calendar.py` | `watch.yml` |
+| パークコート麻布十番東京 | `watch_azabu.py` | `watch_azabu.yml` |
 
 ## 機能
 
-- 予約カレンダーの自動監視（1-3分間隔）
+- 予約カレンダーの自動監視（2分間隔）
+- 予約受付開始の即時検知（麻布十番）
 - 更新検知時のLINE通知
-- 複数送信先への一括配信
+- 友だち全員へのブロードキャスト配信
 - スクリーンショット保存（デバッグ用）
 - ログ記録とエラー通知
 
@@ -49,6 +57,7 @@ python setup.py
 ```bash
 LINE_CHANNEL_ACCESS_TOKEN=your_channel_access_token_here
 TARGET_URL=https://www.31sumai.com/attend/X1413/
+TARGET_URL_AZABU=https://www.31sumai.com/attend/X2571/
 CHECK_INTERVAL=2
 ```
 
@@ -56,7 +65,6 @@ CHECK_INTERVAL=2
 
 ```
 U73b80c9d3652f82ba083d455b78c2c39
-Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ## 使用方法
@@ -66,11 +74,15 @@ Cxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```bash
 # 仮想環境をアクティベート
 source venv/bin/activate  # macOS/Linux
-# または
-venv\Scripts\activate     # Windows
 
-# 監視スクリプトを実行
+# 月島の監視
 python watch_calendar.py
+
+# 麻布十番の監視
+python watch_azabu.py
+
+# LINE通知テスト（麻布十番）
+python test_line_azabu.py
 ```
 
 ### 定期実行
@@ -99,25 +111,37 @@ crontab -e
 ## ファイル構成
 
 ```
-LINE_notify_tsukishima/
-├── watch_calendar.py      # メイン監視スクリプト
+mansion_notification/
+├── watch_calendar.py      # 月島 監視スクリプト
+├── watch_azabu.py         # 麻布十番 監視スクリプト
 ├── scheduler.py           # 定期実行スケジューラー
 ├── config.py              # 設定ファイル
 ├── setup.py               # セットアップスクリプト
+├── test_line.py           # LINE通知テスト（月島）
+├── test_line_azabu.py     # LINE通知テスト（麻布十番）
 ├── requirements.txt       # Python依存関係
 ├── subscribers.txt        # 送信先IDリスト
 ├── .env                   # 環境変数（要作成）
+├── .github/workflows/
+│   ├── watch.yml          # 月島 GitHub Actions
+│   └── watch_azabu.yml    # 麻布十番 GitHub Actions
 ├── data/                  # データ保存ディレクトリ（自動作成）
 └── venv/                  # Python仮想環境（自動作成）
 ```
 
 ## 監視の仕組み
 
+### 月島（watch_calendar.py）
 1. **ページアクセス**: Playwrightで対象URLにアクセス
 2. **JavaScript描画待ち**: 5秒間待機してカレンダー表示完了
 3. **テキスト抽出**: 予約カレンダー部分のテキストを取得
 4. **差分検知**: 前回のハッシュ値と比較
 5. **通知送信**: 変化があり、かつ「空き」を示すキーワードがある場合にLINE通知
+
+### 麻布十番（watch_azabu.py）
+1. **Phase 1（受付開始前）**: requestsで軽量チェック。「予約を受け付けておりません」の有無を確認
+2. **Phase 2（受付開始後）**: キーワードが消えたら即座にLINE速報通知を送信
+3. **カレンダー取得**: Playwrightで予約カレンダーの詳細（空き状況）を取得して追加通知
 
 ## カスタマイズ
 
