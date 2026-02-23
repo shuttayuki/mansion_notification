@@ -308,8 +308,31 @@ def extract_calendar(page):
     return ""
 
 
+def test_notification():
+    """LINE通知の疎通確認用テストメッセージを送信"""
+    log_message("テスト通知モードで実行")
+    message = f"""【テスト通知】パークコート麻布十番東京 監視システム
+
+この通知は疎通確認用のテストメッセージです。
+LINE通知が正常に動作しています。
+
+対象URL: {URL}
+送信時刻: {jst_now()}"""
+
+    success = line_broadcast(message)
+    if success:
+        log_message("テスト通知の送信に成功しました")
+    else:
+        log_message("テスト通知の送信に失敗しました")
+
+
 def main():
     """メイン処理"""
+    # テストモード
+    if os.getenv("TEST_MODE", "").lower() in ("true", "1", "yes"):
+        test_notification()
+        return
+
     log_message("=" * 50)
     log_message("パークコート麻布十番東京 予約監視開始")
     log_message(f"対象URL: {URL}")

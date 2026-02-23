@@ -5,7 +5,15 @@ on:
     # 2分ごとに実行
     - cron: "*/2 * * * *"
   workflow_dispatch:
-    # 手動実行も可能
+    inputs:
+      test_mode:
+        description: 'テスト通知を送信する（LINE疎通確認用）'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
 
 jobs:
   monitor:
@@ -35,6 +43,7 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           TARGET_URL_AZABU: https://www.31sumai.com/attend/X2571/
           CHECK_INTERVAL: 2
+          TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
 
       - name: ログをアップロード（デバッグ用）
         if: always()
