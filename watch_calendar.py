@@ -459,8 +459,72 @@ LOOP_DURATION_MIN = 350  # ループ継続時間（分）≒約5時間50分
 LOOP_INTERVAL_SEC = CHECK_INTERVAL * 60  # チェック間隔（秒）
 
 
+def test_notification():
+    """LINE通知の疎通確認用テストメッセージを送信"""
+    log_message("テスト通知モードで実行")
+    message = f"""【テスト通知】セントラルガーデン月島 ザ タワー 監視システム
+
+この通知は疎通確認用のテストメッセージです。
+LINE通知が正常に動作しています。
+
+対象URL: {URL}
+送信時刻: {jst_now()}"""
+
+    success = line_broadcast(message)
+    if success:
+        log_message("テスト通知の送信に成功しました")
+    else:
+        log_message("テスト通知の送信に失敗しました")
+
+
+def test_simulate():
+    """予約枠変化を模擬し、本番と同じ通知フローをテスト"""
+    log_message("シミュレーションモードで実行（予約枠変化を模擬）")
+
+    dummy_calendar = [
+        "9月 1日 ○",
+        "9月 2日 △",
+        "9月 3日 ×",
+        "9月 4日 ○",
+        "9月 5日 ×",
+    ]
+
+    summary = "+ 9月 1日 ○\n+ 9月 2日 △\n+ 9月 4日 ○"
+
+    message = f"""【テスト】【予約枠状況更新】{jst_now()}
+
+予約枠に新しく空きまたは空きの可能性があります！
+○：余裕あり、△：まもなく満席
+
+URL: {URL}
+
+変更内容:
+{summary}
+
+現在の状況:
+{chr(10).join(dummy_calendar)}
+
+※これはシミュレーションです（ダミーデータ）
+監視システムより自動通知"""
+
+    success = line_broadcast(message)
+    if success:
+        log_message("シミュレーション通知の送信に成功しました")
+    else:
+        log_message("シミュレーション通知の送信に失敗しました")
+
+
 def main():
     """メイン処理: 55分間ループしながら定期チェック"""
+    # テストモード
+    test_mode = os.getenv("TEST_MODE", "").lower()
+    if test_mode in ("true", "1", "yes"):
+        test_notification()
+        return
+    if test_mode == "simulate":
+        test_simulate()
+        return
+
     log_message("=" * 50)
     log_message("セントラルガーデン月島 予約監視開始")
     log_message(f"対象URL: {URL}")
