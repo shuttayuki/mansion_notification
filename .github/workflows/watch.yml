@@ -5,7 +5,16 @@ on:
     # 6時間ごとに実行（スクリプト内で350分間ループ）
     - cron: "0 */6 * * *"
   workflow_dispatch:
-    # 手動実行も可能
+    inputs:
+      test_mode:
+        description: 'テストモード選択'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+          - 'simulate'
 
 jobs:
   monitor:
@@ -36,6 +45,7 @@ jobs:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           TARGET_URL: https://www.31sumai.com/attend/X1413/
           CHECK_INTERVAL: 3
+          TEST_MODE: ${{ github.event.inputs.test_mode || 'false' }}
           
       - name: ログをアップロード（デバッグ用）
         if: always()

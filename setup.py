@@ -84,20 +84,13 @@ def main():
     else:
         print("✅ .envファイルが存在します")
     
-    if not os.path.exists("subscribers.txt"):
-        print("⚠️  subscribers.txtファイルが存在しません")
-        print("送信先のLINE IDを1行1つで記述してください")
-    else:
-        print("✅ subscribers.txtファイルが存在します")
-    
     print("\n" + "=" * 60)
     print("セットアップ完了！")
     print("=" * 60)
     print("\n次のステップ:")
     print("1. .envファイルにLINE_CHANNEL_ACCESS_TOKENを設定")
-    print("2. subscribers.txtに送信先IDを設定")
-    print("3. テスト実行: python watch_calendar.py")
-    print("4. 定期実行開始: python scheduler.py")
+    print("2. テスト実行: python watch_calendar.py")
+    print("3. 定期実行開始: python scheduler.py")
     print("\n詳細はREADME.mdを参照してください")
 
 if __name__ == "__main__":
